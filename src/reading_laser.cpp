@@ -5,20 +5,30 @@
 #include <iostream>
 
 
+/*	function description: get_min
+ *
+ * 	param@ msg : 
+ *	param@ range_min: represents the first value of the considered region (0 := right)
+ *	param@ range_max: represente the last value of the considered region (719:= last one)
+ *
+ *	returns@ the minimum value found in the msg->ranges[]
+ */
 float get_min(const sensor_msgs::LaserScan::ConstPtr& msg, int range_min, int range_max){
 	
 	
 	int k = 0;
 	float temp_min = 0;
-	
+	/*assigns the starting value to temp_min*/
 	temp_min = msg->ranges[range_min];
 	
+	/*simple find_minimum function but with the ranges as parameters (range_min, range_max)*/
 	for(k = range_min; k < range_max; k++)
 	{
 		if(msg->ranges[k] < temp_min)
 			temp_min = msg->ranges[k];
 	}
 	
+	/*if the min value exceeds 10 meters, it would return 'inf', which we cut to 10*/
 	if(temp_min > 10)
 		temp_min = 10;
 
@@ -56,8 +66,6 @@ int main(int argc, char **argv)
 
   return 0;
 }
-
-/* FUNCTIONS DEFINITIONS */
 
 
 
