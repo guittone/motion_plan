@@ -9,13 +9,11 @@ ros::Publisher motion_pub = {};
 
 /*functions declarations*/
 float get_min(const sensor_msgs::LaserScan::ConstPtr& msg, int range_min, int range_max);
-
 void clbk_laser(const sensor_msgs::LaserScan::ConstPtr& msg);
-
 void take_actions(float regions[], float sft_dist);
 
 /*global variables*/
-float sft_dist_ = 1.0;
+float sft_dist_ = 1.0; //safety distance
 
 int main(int argc, char **argv)
 {
@@ -39,11 +37,11 @@ void clbk_laser(const sensor_msgs::LaserScan::ConstPtr& msg)
 	int k = 0;
 	
 	//right = min_regions[0], frr = min_regions[1], ffr = min_regions[2], ...
-	float min_regions[6] = {};
+	float min_regions[5] = {};
 	
 	//calculates the minimum for each of the 6 regions
-	for(k = 0; k < 6; k++){
-		min_regions[k] = get_min(msg, k*120, (k+1)*120);
+	for(k = 0; k < 5; k++){
+		min_regions[k] = get_min(msg, k*144, (k+1)*144);
 	}
 	//now we have the position of the closes object for each region in the min_regions[] array
 	
@@ -77,7 +75,6 @@ float get_min(const sensor_msgs::LaserScan::ConstPtr& msg, int range_min, int ra
 /*	function description: take_actions
  *
  * 	param@ regions[]: array containing the position of closest object for each region
- *	param@ num_r: number of total regions (also length of the min_regions[] array)
  *	param@ sft_dist: safety distance (distance at which we avoid an obstacle)	
  *
  *	returns@ void
@@ -94,132 +91,81 @@ void take_actions(float regions[], float sft_dist)
 	double linear_x  = 0.0;
 	double angular_z = 0.0;
 	
-	std::string state_description = "";
+	std_msgs::String state_description;
 	
-	/*	regions:| 	0		|		1		|		2		|		3		|		4		|		5 	|
-	 *					| right	|  frr  |	 ffr	|	 ffl 	|	 fll	|	left	|
-	 *	but we will exclude from computations the border regions left and right!
+	/*	
+	 *	 we will exclude from computations the border regions left and right!
+	 *
+	 *    |------------------/front\--------------|
+	 *    |--------/fright--/      \--fleft\------|
+	 *    |-right-/                        \-left-|
+	 *
 	 */
-	float frr   = regions[1];
-	float ffr		= regions[2];
-	float ffl		= regions[3];
-	float fll		= regions[4];
+	float fright = regions[1];
+	float front  = regions[2];
+	float fleft  = regions[3];
 	
-	while(ros::ok())
+	if((fright > sft_dist) && (front > sft_dist) && (fleft > sft_dist))
 	{
-		if((frr > sft_dist) && (ffr > sft_dist) && (ffl > sft_dist) && (fll > sft_dist))
-		{
-			state_description = "case 1 - nothing";
-			linear_x = 0.6;
-			angular_z = 0;
-		}
-		else if((frr > sft_dist) && (ffr > sft_dist) && (ffl > sft_dist) && (fll < sft_dist))
-		{
-			state_description = "case 2 - fll";
-			linear_x = 0;
-			angular_z = 0.3;
-		}
-		else if((frr > sft_dist) && (ffr > sft_dist) && (ffl < sft_dist) && (fll > sft_dist))
-		{
-			state_description = "case 3 - ffl";
-			linear_x = 0;
-			angular_z = 0.3;
-			}
-		else if((frr > sft_dist) && (ffr > sft_dist) && (ffl < sft_dist) && (fll < sft_dist))
-		{
-			state_description = "case 4 - ffl and fll";
-			linear_x = 0;
-			angular_z = 0.3;
-		}
-		else if((frr > sft_dist) && (ffr < sft_dist) && (ffl > sft_dist) && (fll > sft_dist))
-		{
-			state_description = "case 5 - ffr";
-			linear_x = 0;
-			angular_z = -0.3;
-		}
-		else if((frr > sft_dist) && (ffr < sft_dist) && (ffl > sft_dist) && (fll < sft_dist))
-		{
-			state_description = "case 6 - ffr and fll";
-			linear_x = 0;
-			angular_z = 0.3;
-		}
-		else if((frr > sft_dist) && (ffr < sft_dist) && (ffl < sft_dist) && (fll > sft_dist))
-		{
-			state_description = "case 7 - ffr and ffl";
-			linear_x = 0;
-			angular_z = 0.3;
-		}
-		else if((frr > sft_dist) && (ffr < sft_dist) && (ffl < sft_dist) && (fll < sft_dist))
-		{
-			state_description = "case 8 - ffr and ffl and fll";
-			linear_x = 0;
-			angular_z = 0.3;
-		}
-		else if((frr < sft_dist) && (ffr > sft_dist) && (ffl > sft_dist) && (fll > sft_dist))
-		{
-			state_description = "case 9 - frr";
-			linear_x = 0;
-			angular_z = -0.3;
-		}
-		else if((frr < sft_dist) && (ffr > sft_dist) && (ffl > sft_dist) && (fll < sft_dist))
-		{
-			state_description = "case 10 - frr and fll";
-			linear_x = 0.3;
-			angular_z = 0;
-		}
-		else if((frr < sft_dist) && (ffr > sft_dist) && (ffl < sft_dist) && (fll > sft_dist))
-		{
-			state_description = "case 11 - frr and ffl";
-			linear_x = 0;
-			angular_z = -0.3;//
-		}
-		else if((frr < sft_dist) && (ffr > sft_dist) && (ffl < sft_dist) && (fll < sft_dist))
-		{
-			state_description = "case 12 - frr and ffl and fll";
-			linear_x = 0;
-			angular_z = 0.3;//
-	
-		}
-		else if((frr < sft_dist) && (ffr < sft_dist) && (ffl > sft_dist) && (fll > sft_dist))
-		{
-			state_description = "case 13 - frr and ffr";
-			linear_x = 0;
-			angular_z = -0.3;//
-		}
-		else if((frr < sft_dist) && (ffr < sft_dist) && (ffl > sft_dist) && (fll < sft_dist))
-		{
-			state_description = "case 14 - frr and ffr and fll";
-			linear_x = 0;
-			angular_z = -0.3;//
-		}
-		else if((frr < sft_dist) && (ffr < sft_dist) && (ffl < sft_dist) && (fll > sft_dist))
-		{
-			state_description = "case 15 - frr and ffr and ffl";
-			linear_x = 0;
-			angular_z = 0.3;
-		}
-		else if((frr < sft_dist) && (ffr < sft_dist) && (ffl < sft_dist) && (fll < sft_dist))
-		{
-			state_description = "case 16 - frr and ffr and ffl and fll";
-			linear_x = 0;
-			angular_z = 0.3;
-		}
-		else
-		{
-			state_description = "unknown case";
-			ROS_INFO("%f-%f-%f-%f-%f-%f", regions[0], regions[1], regions[2], regions[3], regions[4], regions[5]);
-			
-		}
-		
-		std::stringstream ss;
-		
-		ss << state_description ;
-		
-		msg.linear.x  = linear_x ; 
-		msg.angular.z = angular_z;
-		
-		motion_pub.publish(msg);
+		state_description.data = "case 1 - nothing [go straight]";
+		linear_x = 0.5;
+		angular_z = 0;
 	}
+	else if((fright > sft_dist) && (front > sft_dist) && (fleft < sft_dist))
+	{
+		state_description.data = "case 2 - fleft [turn right]";
+		linear_x = 0;
+		angular_z = 0.3;
+	}
+	else if((fright > sft_dist) && (front < sft_dist) && (fleft > sft_dist))
+	{
+		state_description.data = "case 3 - front [turn right]";
+		linear_x = 0;
+		angular_z = 0.3;
+		}
+	else if((fright > sft_dist) && (front < sft_dist) && (fleft < sft_dist))
+	{
+		state_description.data = "case 4 - front and fleft [turn right]";
+		linear_x = 0;
+		angular_z = 0.3;
+	}
+	else if((fright < sft_dist) && (front > sft_dist) && (fleft > sft_dist))
+	{
+		state_description.data = "case 5 - fright [turn left]";
+		linear_x = 0;
+		angular_z = -0.3;
+	}
+	else if((fright < sft_dist) && (front > sft_dist) && (fleft < sft_dist))
+	{
+		state_description.data = "case 6 - fright and fleft [try straight]";
+		linear_x = 0.3;
+		angular_z = 0;
+	}
+	else if((fright < sft_dist) && (front < sft_dist) && (fleft > sft_dist))
+	{
+		state_description.data = "case 7 - fright and front [turn left]";
+		linear_x = 0;
+		angular_z = -0.3;
+	}
+	else if((fright < sft_dist) && (front < sft_dist) && (fleft < sft_dist))	
+	{
+		state_description.data = "case 8 - fright and front and fleft [turn right]";
+		linear_x = 0;
+		angular_z = 0.3;
+	}
+	else
+	{
+		state_description.data = "unknown case";
+		ROS_INFO("%f-%f-%f-%f-%f", regions[0], regions[1], regions[2], regions[3], regions[4]);
+		
+	}
+
+	ROS_INFO("[%s]", state_description.data.c_str());
+	
+	msg.linear.x  = linear_x ; 
+	msg.angular.z = angular_z;
+		
+	motion_pub.publish(msg);	
 }
 // end of take_action
 

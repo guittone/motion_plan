@@ -41,15 +41,14 @@ void clbk_laser(const sensor_msgs::LaserScan::ConstPtr& msg)
 {
 	int k = 0;
 	
-	float min_regions[6] = {};
+	float min_regions[5] = {};
 	
 	//calculates the minimum for each of the 6 regions
-	for(k = 0; k < 6; k++){
-		min_regions[k] = get_min(msg, k*120, (k+1)*120);
+	for(k = 0; k < 5; k++){
+		min_regions[k] = get_min(msg, k*144, (k+1)*144);
 	}
 	
-  ROS_INFO("\nright: [%f]\nfrr:   [%f]\nffr:   [%f]\nffl:   [%f]\nfll:   [%f]\nleft:  [%f]", min_regions[0], min_regions[1], min_regions[2], min_regions[3], min_regions[4], min_regions[5]  	
-  );
+  ROS_INFO("\nright: [%f]\nfright:   [%f]\nfront:   [%f]\nfleft:   [%f]\nleft:  [%f]", min_regions[0], min_regions[1], min_regions[2], min_regions[3], min_regions[4]);
 
 }
 
