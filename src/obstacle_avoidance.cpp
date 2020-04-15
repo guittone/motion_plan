@@ -14,6 +14,10 @@ void take_actions(float regions[], float sft_dist);
 
 /*global variables*/
 float sft_dist_ = 1.0; //safety distance
+float go_fwd_  = 0.5; //linear motion
+float try_fwd_ = 0.3; //linear motion when trying to move fwd
+float turn_    = 0.3; //angular motion when obstacle is found (0.3 is turning right)
+ 
 
 int main(int argc, char **argv)
 {
@@ -36,10 +40,10 @@ void clbk_laser(const sensor_msgs::LaserScan::ConstPtr& msg)
 {
 	int k = 0;
 	
-	//right = min_regions[0], frr = min_regions[1], ffr = min_regions[2], ...
+	//right = min_regions[0], fright = min_regions[1], front = min_regions[2], ...
 	float min_regions[5] = {};
 	
-	//calculates the minimum for each of the 6 regions
+	//calculates the minimum for each of the 5 regions
 	for(k = 0; k < 5; k++){
 		min_regions[k] = get_min(msg, k*144, (k+1)*144);
 	}
@@ -96,9 +100,9 @@ void take_actions(float regions[], float sft_dist)
 	/*	
 	 *	 we will exclude from computations the border regions left and right!
 	 *
-	 *    |------------------/front\--------------|
-	 *    |--------/fright--/      \--fleft\------|
-	 *    |-right-/                        \-left-|
+	 *    |----------------/front\---------------|
+	 *    |--------/fright/.......\fleft\--------|
+	 *    |-left--/......................\-right-|
 	 *
 	 */
 	float fright = regions[1];
@@ -108,50 +112,50 @@ void take_actions(float regions[], float sft_dist)
 	if((fright > sft_dist) && (front > sft_dist) && (fleft > sft_dist))
 	{
 		state_description.data = "case 1 - nothing [go straight]";
-		linear_x = 0.5;
+		linear_x = go_fwd_;
 		angular_z = 0;
 	}
 	else if((fright > sft_dist) && (front > sft_dist) && (fleft < sft_dist))
 	{
 		state_description.data = "case 2 - fleft [turn right]";
 		linear_x = 0;
-		angular_z = 0.3;
+		angular_z = turn_;
 	}
 	else if((fright > sft_dist) && (front < sft_dist) && (fleft > sft_dist))
 	{
 		state_description.data = "case 3 - front [turn right]";
 		linear_x = 0;
-		angular_z = 0.3;
+		angular_z = turn_;
 		}
 	else if((fright > sft_dist) && (front < sft_dist) && (fleft < sft_dist))
 	{
 		state_description.data = "case 4 - front and fleft [turn right]";
 		linear_x = 0;
-		angular_z = 0.3;
+		angular_z = turn_;
 	}
 	else if((fright < sft_dist) && (front > sft_dist) && (fleft > sft_dist))
 	{
 		state_description.data = "case 5 - fright [turn left]";
 		linear_x = 0;
-		angular_z = -0.3;
+		angular_z = -turn_;
 	}
 	else if((fright < sft_dist) && (front > sft_dist) && (fleft < sft_dist))
 	{
 		state_description.data = "case 6 - fright and fleft [try straight]";
-		linear_x = 0.3;
+		linear_x = try_fwd_;
 		angular_z = 0;
 	}
 	else if((fright < sft_dist) && (front < sft_dist) && (fleft > sft_dist))
 	{
 		state_description.data = "case 7 - fright and front [turn left]";
 		linear_x = 0;
-		angular_z = -0.3;
+		angular_z = -turn_;
 	}
 	else if((fright < sft_dist) && (front < sft_dist) && (fleft < sft_dist))	
 	{
 		state_description.data = "case 8 - fright and front and fleft [turn right]";
 		linear_x = 0;
-		angular_z = 0.3;
+		angular_z = turn_;
 	}
 	else
 	{

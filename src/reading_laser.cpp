@@ -43,7 +43,7 @@ void clbk_laser(const sensor_msgs::LaserScan::ConstPtr& msg)
 	
 	float min_regions[5] = {};
 	
-	//calculates the minimum for each of the 6 regions
+	//calculates the minimum for each of the 5 regions
 	for(k = 0; k < 5; k++){
 		min_regions[k] = get_min(msg, k*144, (k+1)*144);
 	}
