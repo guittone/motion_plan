@@ -5,13 +5,11 @@ Motion plan ros package for a 2 wheeled robot, currently containing:
     -- reading_laser.cpp
     -- obstacle_avoidance.cpp
 
-|---------------|
 |-    TO DO    -|
 |---------------|
 
 [ ] finish the navigation algorithm;
 
-|---------------|
 |-    DONE     -|
 |---------------|
 
