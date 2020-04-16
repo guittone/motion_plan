@@ -5,7 +5,6 @@
 #include <sstream>
 #include <iostream>
 
-ros::Publisher motion_pub = {};
 
 /*functions declarations*/
 float get_min(const sensor_msgs::LaserScan::ConstPtr& msg, int range_min, int range_max);
@@ -17,6 +16,7 @@ float sft_dist_ = 1.0; //safety distance
 float go_fwd_  = 0.5; //linear motion
 float try_fwd_ = 0.3; //linear motion when trying to move fwd
 float turn_    = 0.3; //angular motion when obstacle is found (0.3 is turning right)
+ros::Publisher motion_pub = {};
  
 
 int main(int argc, char **argv)
@@ -35,6 +35,7 @@ int main(int argc, char **argv)
 	return 0;
 }
 
+/* functions definitions */
 //callback function
 void clbk_laser(const sensor_msgs::LaserScan::ConstPtr& msg)
 {
