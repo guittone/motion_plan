@@ -1,8 +1,8 @@
 Main characteristics: two wheeled robot reading from a laser scan.
 
 Motion plan ros package for a 2 wheeled robot, currently containing:
-- src:
-  |___ reading_laser.cpp
+- src:\n
+  |___ reading_laser.cpp\n
   |___ obstacle_avoidance.cpp
 
 |---------------|
