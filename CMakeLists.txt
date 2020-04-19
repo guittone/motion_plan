@@ -159,6 +159,10 @@ add_executable(navigation_algorithm src/navigation_algorithm.cpp)
 target_link_libraries(navigation_algorithm ${catkin_LIBRARIES})
 add_dependencies(navigation_algorithm motion_plan_generate_messages_cpp)
 
+add_executable(go_to_point src/go_to_point.cpp)
+target_link_libraries(go_to_point ${catkin_LIBRARIES})
+add_dependencies(go_to_point motion_plan_generate_messages_cpp)
+
 #############
 ## Install ##
 #############

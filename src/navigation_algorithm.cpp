@@ -1,359 +1,350 @@
 /*
-TO BE DONE: garnicht
-*/
+ __  __   ______   __  __   ______   ____     ______   ______  ______   _____    __  __     
+/\ \/\ \ /\  _  \ /\ \/\ \ /\__  _\ /\  _`\  /\  _  \ /\__  _\/\__  _\ /\  __`\ /\ \/\ \    
+\ \ `\\ \\ \ \L\ \\ \ \ \ \\/_/\ \/ \ \ \L\_\\ \ \L\ \\/_/\ \/\/_/\ \/ \ \ \/\ \\ \ `\\ \   
+ \ \ , ` \\ \  __ \\ \ \ \ \  \ \ \  \ \ \L_L \ \  __ \  \ \ \   \ \ \  \ \ \ \ \\ \ , ` \  
+  \ \ \`\ \\ \ \/\ \\ \ \_/ \  \_\ \__\ \ \/, \\ \ \/\ \  \ \ \   \_\ \__\ \ \_\ \\ \ \`\ \ 
+   \ \_\ \_\\ \_\ \_\\ `\___/  /\_____\\ \____/ \ \_\ \_\  \ \_\  /\_____\\ \_____\\ \_\ \_\
+    \/_/\/_/ \/_/\/_/ `\/__/   \/_____/ \/___/   \/_/\/_/   \/_/  \/_____/ \/_____/ \/_/\/_/
+
+**********************************************
+*-Navigation algorithm for a 2 wheeled robot-*
+**********************************************
+by Guerrini Daniele and Scaloni Alessandro.
+
+PROGRAM FLOW:
+
+******		************		****************
+*MAIN* -> *CLBK_LASER* -> *DECIDE_ACTIONS* 
+******		************		****************
+  |												 
+  V
+***********					
+*CLBK_ODOM*
+***********
+
+*/                                                                                          
+
+/* -- INCLUDE AND DEFINES --------------------------------------- */
+/*ros libraries*/
 #include "ros/ros.h"
-#include "std_msgs/String.h"
-#include "sensor_msgs/LaserScan.h"
 #include "geometry_msgs/Twist.h"
 #include "geometry_msgs/Point.h"
-#include "nav_msgs/Odometry.h"
-#include "tf/transform_listener.h"
+#include "sensor_msgs/LaserScan.h" 
+#include "tf/transform_listener.h" 
 #include "tf/transform_datatypes.h"
+#include "nav_msgs/Odometry.h"
+/*c++ libraries*/
+#include <cmath>
 
 #define _USE_MATH_DEFINES
+/* -- GLOBAL VARIABLES ------------------------------------------ */
+ros::Publisher motion_pub_ = {};
 
-#include <sstream>
-#include <iostream>
-#include <cmath>
-#include <algorithm>
+typedef enum 
+{
+		TURN_LEFT = 0,     /*we need to turn left*/
+		TURN_RIGHT,				 /*we need to turn right*/
+		GO_TO_POINT,       /*we need to go to point*/
+		FOLLOW_WALL_RIGHT, /*we need to follow right*/
+		FOLLOW_WALL_LEFT,  /*we need to follow left*/
+		UNKNOWN            /*unknown case*/
+}	ROBOT_STATE;
 
-/*--functions declarations--------------------------*/
-void clbk_laser(const sensor_msgs::LaserScan::ConstPtr& msg);
-void clbk_odom(const nav_msgs::Odometry::ConstPtr& msg);
-void fix_yaw(geometry_msgs::Point des_pos);
-void change_state(int next_state);
-void state_changer(geometry_msgs::Point des_pos);
-void go_fwd();
-double yaw_check(geometry_msgs::Point des_pos);
-double pos_check(geometry_msgs::Point des_pos);
-float get_min(const sensor_msgs::LaserScan::ConstPtr& msg, int range_min, int range_max);
-void get_over(float sft_dist);
-void done();
+ROBOT_STATE state_;
 
-/*------------------------------------------------------*/
-/*--global variables------------------------------------*/
-/*------------------------------------------------------*/
-ros::Publisher motion_pub = {};
+typedef enum
+{
+	FIX_YAW = 0, /*we need to fix heading*/
+	STRAIGHT,    /*we need to go straight*/
+	ARRIVED      /*we have arrived*/
+}	GOING_TO_POINT_STATE;
 
-/*pitch and roll won't be used initially*/
-double roll_  = 0;
-double pitch_ = 0;
-double yaw_   = 0;
+GOING_TO_POINT_STATE gtp_state_ = FIX_YAW; /*go to point global variable*/
 
+float min_regions_[5] = {};
+
+double roll_ = 0.0;
+double pitch_ = 0.0;
+double yaw_ = 0.0;
+double err_yaw_;
+double err_pos_ = 1000;
 double yaw_precision_ = M_PI/90;
-double dist_precision = 0.3;
+double dist_precision_ = 0.3;
+float sft_dist_ = 1.0;
+/*angular.z at which the robot turns when turning left*/
+float TURN_LEFT_ANGULAR_ = -0.6;
+/*angular.z at which the robot turns when turning right*/
+float TURN_RIGHT_ANGULAR_ =  0.6;
+/*linear.x at which the robot goes straight*/
+float GO_STRAIGHT_LINEAR_ = 0.5;
+/*linear.x at which the robot moves fwd while fixing yaw*/
+float FIX_YAW_LINEAR_ = 0.3;
+/*linear.x at which the robot moves while following wall*/
+float FOLLOW_WALL_LINEAR_ = 0.5;
+
 geometry_msgs::Point position_;
 geometry_msgs::Point desired_position_;
-
-int state_ = 0;	//machine "decision" state
-int obstacle_detected_ = 0;
-
-/*obstacle handler global variables*/
-float regions_[5] = {};
-float sft_dist_ = 1; //safety distance
-float go_fwd_  = 0.5; //linear motion
-float try_fwd_ = 0.3; //linear motion when trying to move fwd
-float turn_    = 0.3; //angular motion when obstacle is found (0.3 is turning right)
-
-/*------------------------------------------------------*/
-/*--main function---------------------------------------*/
-/*------------------------------------------------------*/
+/* ************************************************************** */
+/* -- FUNCTIONS DECLARATIONS ------------------------------------ */
+/*1*/void clbk_laser(const sensor_msgs::LaserScan::ConstPtr& msg);
+/*2*/float get_min(const sensor_msgs::LaserScan::ConstPtr& msg, int index1, int index2, float max_dist);
+/*3*/void decide_actions(float min_regions_[], float sft_dist);
+/*4*/void robot_moving(ROBOT_STATE move_type);
+/*5*/void go_straight(const geometry_msgs::Point des_pos, geometry_msgs::Twist twist_msg);
+/*6*/void fix_yaw(const geometry_msgs::Point des_pos, geometry_msgs::Twist twist_msg);
+/*7*/void clbk_odom(const nav_msgs::Odometry::ConstPtr& odom_msg);
+/* ************************************************************** */
+/* -- FUNCTIONS DEFINITIONS ------------------------------------- */
+/*0* main */
 int main(int argc, char **argv)
 {
-	/*initializing the various topic subscriptions and publishes*/
-	ros::init(argc, argv, "reading_laser");
+	ros::init(argc, argv, "navigation_node");
 	
 	ros::NodeHandle n;
 	
-	::motion_pub = n.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
+	ros::Subscriber laser_sub, odom_sub;
 	
-	ros::Subscriber motion_sub = n.subscribe("/m2wr/laser/scan", 100, clbk_laser);
+	odom_sub = n.subscribe("/odom", 100, clbk_odom);
 	
-	ros::Subscriber odom_sub = n.subscribe("/odom", 100, clbk_odom);
-
-	desired_position_.x = -3;
+	laser_sub = n.subscribe("m2wr/laser/scan", 100, clbk_laser);
+	
+	motion_pub_ = n.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
+	
+	desired_position_.x =  8;
 	desired_position_.y = -8;
-	desired_position_.z = 0;
+	desired_position_.z =  0;
 	
-	while (ros::ok()){
-		/*finite state machine*/
-		state_changer(desired_position_);
+	while(ros::ok())
+	{
+		ros::spinOnce();
+	}
 	
-		if(state_ == 0)
+	return 0;
+}
+/*1* clbk_laser */
+void clbk_laser(const sensor_msgs::LaserScan::ConstPtr& msg)
+{
+	int k;
+	/*laser points per region*/
+	int lsr_p = 144; 
+	float max_dist = 10.0;
+	
+	for(k = 0; k < 6; k++)
+	{
+		min_regions_[k] = get_min(msg, lsr_p*k, lsr_p*(k+1), max_dist);
+	}
+	
+	decide_actions(min_regions_, sft_dist_);
+}
+/*end1*/
+
+/*2* get_min */
+float get_min(const sensor_msgs::LaserScan::ConstPtr& msg, int index1, int index2, float max_dist)
+{
+	int i;
+	float temp_min = msg->ranges[index1];
+	
+	for(i = index1; i < index2; i++)
+	{
+		if(msg->ranges[i] < temp_min)
+			{temp_min = msg->ranges[i];}
+		if(temp_min > max_dist)
+			{temp_min = max_dist;}
+	}	
+	return temp_min;
+}
+/*end2*/
+
+/*3* decide_actions */
+void decide_actions(float min_regions[], float sft_dist)
+{
+	float right  = min_regions[0];
+	float fright = min_regions[1];
+	float front  = min_regions[2];
+	float fleft  = min_regions[3];
+	float left   = min_regions[4];
+/*typedef enum
+{
+	FIX_YAW = 0, 
+	STRAIGHT,    
+	ARRIVED      
+}	GOING_TO_POINT_STATE;*/
+
+	/*first condition checks if we haven't arrived yet*/
+	if(gtp_state_ != ARRIVED)
+	{
+		if(     (fright > sft_dist_) && (front > sft_dist_) && (fleft > sft_dist_))
 		{
-			go_fwd();
+			state_ = GO_TO_POINT;
 		}
-		else if(state_ == 1)
+		else if((fright > sft_dist_) && (front > sft_dist_) && (fleft < sft_dist_))
 		{
-			fix_yaw(desired_position_);//**/
+			state_ = FOLLOW_WALL_LEFT;
 		}
-		else if(state_ == 2)
+		else if((fright > sft_dist_) && (front < sft_dist_) && (fleft > sft_dist_))
 		{
-			get_over(sft_dist_);//*/
+			(err_yaw_ > 0) ? (state_ = TURN_RIGHT) : (state_ = TURN_LEFT);
 		}
-		else if(state_ == 3)
+		else if((fright > sft_dist_) && (front < sft_dist_) && (fleft < sft_dist_))
 		{
-			done();
-			return 0;
+			(err_yaw_ > 0) ? (state_ = TURN_RIGHT) : (state_ = TURN_LEFT);
+		}
+		else if((fright < sft_dist_) && (front > sft_dist_) && (fleft > sft_dist_))
+		{
+			state_ = FOLLOW_WALL_RIGHT;
+		}
+		else if((fright < sft_dist_) && (front > sft_dist_) && (fleft < sft_dist_))
+		{
+			(err_yaw_ > 0) ? (state_ = TURN_RIGHT) : (state_ = TURN_LEFT);
+		}
+		else if((fright < sft_dist_) && (front < sft_dist_) && (fleft > sft_dist_))
+		{
+			(err_yaw_ > 0) ? (state_ = TURN_RIGHT) : (state_ = TURN_LEFT);
+		}
+		else if((fright < sft_dist_) && (front < sft_dist_) && (fleft < sft_dist_))
+		{
+			(err_yaw_ > 0) ? (state_ = TURN_RIGHT) : (state_ = TURN_LEFT);
 		}
 		else
 		{
-			ROS_INFO("Unknown state!");
-			return 0;
+			state_ = UNKNOWN;
+			ROS_INFO("%f-%f-%f-%f-%f [UNKNOWN CASE]", min_regions[0], min_regions[1], min_regions[2], min_regions[3], min_regions[4]);
 		}
-	
-		ros::spinOnce();
+		
+		robot_moving(state_);
 	}
-	return 0;
-	
+	else if(err_pos_ < dist_precision_)/*if we are at destination*/
+	{
+		ROS_INFO("Mission completed!");
+		
+		geometry_msgs::Twist twist_msg;
+		twist_msg.linear.x = 0.0;
+		twist_msg.angular.z = 0.0;
+		
+		motion_pub_.publish(twist_msg);	
+	}
 }
-/*------------------------------------------------------*/
-/*--functions definitions-------------------------------*/
-/*------------------------------------------------------*/
+/*end3*/
 
-/*--obstacle handler ---------------------------------------------*/
-void get_over(float sft_dist)
+/*4* robot_moving*/
+void robot_moving(ROBOT_STATE move_type)
 {
+	geometry_msgs::Twist twist_msg = {};	
 	
-	geometry_msgs::Twist msg;
-	msg = {};
-	
-	double linear_x  = 0.0;
-	double angular_z = 0.0;
-	
-	std_msgs::String state_description;
-	
-	/*	
-	 *	 we will exclude from computations the border regions left and right!
-	 *
-	 *    |----------------/front\---------------|
-	 *    |--------/fright/.......\fleft\--------|
-	 *    |-left--/......................\-right-|
-	 *
-	 */
-	float fright = regions_[1];
-	float front  = regions_[2];
-	float fleft  = regions_[3];
-	
-	
-	ROS_INFO("Handling obstacle");
-	
-	fix_yaw(desired_position_);
-	
-	if((fright > sft_dist) && (front > sft_dist) && (fleft > sft_dist))
+	if(err_pos_ < dist_precision_)
 	{
-		state_description.data = "case 1 - nothing [go straight]";
-		linear_x = go_fwd_;
-		angular_z = 0;
+		gtp_state_ = ARRIVED;
 	}
-	else if((fright > sft_dist) && (front > sft_dist) && (fleft < sft_dist))
+	
+	if(move_type == GO_TO_POINT)
 	{
-		state_description.data = "case 2 - fleft [turn right]";
-		linear_x = 0;
-		angular_z = turn_;
-	}
-	else if((fright > sft_dist) && (front < sft_dist) && (fleft > sft_dist))
-	{
-		state_description.data = "case 3 - front [turn right]";
-		linear_x = 0;
-		angular_z = turn_;
+		ROS_INFO("Going to the point");
+		
+		if(gtp_state_ == FIX_YAW)
+		{
+			fix_yaw(desired_position_, twist_msg);
 		}
-	else if((fright > sft_dist) && (front < sft_dist) && (fleft < sft_dist))
-	{
-		state_description.data = "case 4 - front and fleft [turn right]";
-		linear_x = 0;
-		angular_z = turn_;
+		else if(gtp_state_ == STRAIGHT)
+		{
+			go_straight(desired_position_, twist_msg);
+		}
 	}
-	else if((fright < sft_dist) && (front > sft_dist) && (fleft > sft_dist))
+	else if(move_type == TURN_LEFT)
 	{
-		state_description.data = "case 5 - fright [turn left]";
-		linear_x = 0;
-		angular_z = -turn_;
+		ROS_INFO("Turning right!");
+		twist_msg.linear.x  = 0.0;
+		twist_msg.angular.z = TURN_LEFT_ANGULAR_;
+		motion_pub_.publish(twist_msg);
 	}
-	else if((fright < sft_dist) && (front > sft_dist) && (fleft < sft_dist))
+	else if(move_type == TURN_RIGHT)
 	{
-		state_description.data = "case 6 - fright and fleft [try straight]";
-		linear_x = try_fwd_;
-		angular_z = 0;
+		ROS_INFO("Turning left!");
+		twist_msg.linear.x  = 0.0;
+		twist_msg.angular.z = TURN_RIGHT_ANGULAR_;
+		motion_pub_.publish(twist_msg);
 	}
-	else if((fright < sft_dist) && (front < sft_dist) && (fleft > sft_dist))
+	else if(move_type == FOLLOW_WALL_LEFT)
 	{
-		state_description.data = "case 7 - fright and front [turn left]";
-		linear_x = 0;
-		angular_z = -turn_;
+		ROS_INFO("Avoiding the obstacle on the left!");
+		twist_msg.linear.x = FOLLOW_WALL_LINEAR_;
+		twist_msg.angular.z = TURN_RIGHT_ANGULAR_;
+		motion_pub_.publish(twist_msg);
 	}
-	else if((fright < sft_dist) && (front < sft_dist) && (fleft < sft_dist))	
+	else if(move_type == FOLLOW_WALL_RIGHT)
 	{
-		state_description.data = "case 8 - fright and front and fleft [turn right]";
-		linear_x = 0;
-		angular_z = turn_;
+		ROS_INFO("Avoiding the obstacle on the right!");
+		twist_msg.linear.x = FOLLOW_WALL_LINEAR_;
+		twist_msg.angular.z = TURN_LEFT_ANGULAR_;
+		motion_pub_.publish(twist_msg);
+	}
+}
+/*end4*/
+
+/*5* go_straight */
+void go_straight(const geometry_msgs::Point des_pos, geometry_msgs::Twist twist_msg)
+{
+	double desired_yaw;
+	desired_yaw = atan2(des_pos.y - position_.y, des_pos.x - position_.x);
+	err_yaw_ = desired_yaw - yaw_;
+	err_pos_ = sqrt(pow(des_pos.y - position_.y, 2) + pow(des_pos.x - position_.x, 2));
+	
+	if(err_pos_ > dist_precision_)
+	{
+		twist_msg.linear.x = GO_STRAIGHT_LINEAR_;
+		twist_msg.angular.z = 0.0;
+		motion_pub_.publish(twist_msg);
+	}
+	else
+		gtp_state_ = ARRIVED;
+		
+	if(fabs(err_yaw_) > yaw_precision_)
+	{
+		gtp_state_ = FIX_YAW;
+	}
+}
+/*end5*/
+
+/*6* fix_yaw */
+void fix_yaw(const geometry_msgs::Point des_pos, geometry_msgs::Twist twist_msg)
+{
+	double desired_yaw;
+	desired_yaw = atan2(des_pos.y - position_.y, des_pos.x - position_.x);
+	err_yaw_ = desired_yaw - yaw_;
+	
+	if(fabs(err_yaw_) > yaw_precision_)
+	{
+		if(err_yaw_ > 0)
+		{
+			twist_msg.linear.x = FIX_YAW_LINEAR_;
+			twist_msg.angular.z = TURN_LEFT_ANGULAR_;
+			motion_pub_.publish(twist_msg);
+		}
+		else
+		{
+			twist_msg.linear.x = FIX_YAW_LINEAR_;
+			twist_msg.angular.z = TURN_RIGHT_ANGULAR_;
+			motion_pub_.publish(twist_msg);
+		}
 	}
 	else
 	{
-		state_description.data = "unknown case";
-		ROS_INFO("%f-%f-%f-%f-%f", regions_[0], regions_[1], regions_[2], regions_[3], regions_[4]);
-		
+		gtp_state_ = STRAIGHT;
 	}
 
-	ROS_INFO("[%s]", state_description.data.c_str());
-	
-	msg.linear.x  = linear_x ; 
-	msg.angular.z = angular_z;
-		
-	motion_pub.publish(msg);	
 }
+/*end6*/
 
-/*--state_changer: determines the current machine state-----------*/
-void state_changer(geometry_msgs::Point des_pos)
-{
-	double err_yaw = 0.0;
-	double err_pos = 0.0;
-	
-	err_yaw = yaw_check(des_pos);
-	err_pos = pos_check(des_pos);
-	
-	//if we arrived that the objective we finish the mission
-	if(err_pos <= dist_precision)
-		change_state(3);
-	
-	//check if the yaw is correct, if not, we fix it
-	if(fabs(err_yaw) <= yaw_precision_)
-	{
-		//case 'a': there is no obstacle -> go fwd
-		if(obstacle_detected_ == 0)
-			change_state(0);	//go straight fwd
-		//case 'b': there is an obstale -> handle it
-		else if(obstacle_detected_ == 1)
-			change_state(1); //obstacle handler
-		else
-		{
-			ROS_INFO("Unknown state");
-		}
-	}	//the yaw is not correct, so we fix it
-	else if(fabs(err_yaw) > yaw_precision_)
-		change_state(2); //fix_yaw
-}
-
-/*--yaw_check: returns the yaw error------------------------------*/
-double yaw_check(geometry_msgs::Point des_pos)
-{
-	double desired_yaw = 0.0;
-	double err_yaw     = 0.0;
-	
-	//where position_ is the global variable equal to the position of the robot
-	desired_yaw = atan2(des_pos.y - position_.y, des_pos.x - position_.x);
-	
-	err_yaw = desired_yaw - yaw_;
-
-	return err_yaw;
-}
-
-double pos_check(geometry_msgs::Point des_pos)
-{
-	double err_pos = 0.0;
-	
-	err_pos = sqrt(pow(des_pos.y - position_.y, 2.0) + pow(des_pos.x - position_.x, 2.0));
-	
-	return err_pos;
-}
-
-/*--go straight forward function----------------------------------*/
-/*	publishes a simple "go straight" geometry message 						*/
-void go_fwd()
-{
-	geometry_msgs::Twist twist_msg;
-	twist_msg.linear.x = 0.3;
-	motion_pub.publish(twist_msg);
-}
-
-/*--laser callback function---------------------------------------*/
-void clbk_laser(const sensor_msgs::LaserScan::ConstPtr& msg)
-{
-	int k = 0;
-	
-	//right = min_regions[0], fright = min_regions[1], front = min_regions[2], ...
-	
-	//calculates the minimum for each of the 5 regions
-	for(k = 0; k < 5; k++){
-		regions_[k] = get_min(msg, k*144, (k+1)*144);
-	}
-	//now we have the position of the closes object for each region in the min_regions[] array
-}
-
-/*--get minimum object function-----------------------------------*/
-float get_min(const sensor_msgs::LaserScan::ConstPtr& msg, int range_min, int range_max){
-	
-	int k = 0;
-	float temp_min = 0;
-	/*assigns the starting value to temp_min*/
-	temp_min = msg->ranges[range_min];
-	
-	/*simple find_minimum function but with the ranges as parameters (range_min, range_max)*/
-	for(k = range_min; k < range_max; k++)
-	{
-		if(msg->ranges[k] < temp_min)
-			temp_min = msg->ranges[k];
-	}
-	
-	/*if the min value exceeds 10 meters, it would return 'inf', which we cut to 10*/
-	if(temp_min > 10)
-		temp_min = 10;
-
-	return temp_min;
-	
-}
-
-
-/*--odometry callback function -----------------------------------*/
+/*7* clbk_odom*/
 void clbk_odom(const nav_msgs::Odometry::ConstPtr& odom_msg)
 {
-	position_ = odom_msg->pose.pose.position;
-	
-	tf::Quaternion q(odom_msg->pose.pose.orientation.x,
-									 odom_msg->pose.pose.orientation.y,
-									 odom_msg->pose.pose.orientation.z,
-									 odom_msg->pose.pose.orientation.w);
-	
-	tf::Matrix3x3 m(q);
-	
-	m.getRPY(roll_, pitch_, yaw_);
-}
-
-/*--fix yaw function----------------------------------------------*/
-void fix_yaw(geometry_msgs::Point des_pos)
-{
-	double err_yaw = 0.0;
-	//gets the yaw error from the correct orientation
-	err_yaw = yaw_check(des_pos);
-	
-	geometry_msgs::Twist twist_msg;
-	
-	if(fabs(err_yaw) > yaw_precision_)
-	{
-		if(err_yaw > 0)
-		  //if the yaw error is positive we need to turn right, and viceversa
-			twist_msg.angular.z = -0.3;
-		else if(err_yaw < 0)
-			twist_msg.angular.z =  0.3;
-	}
-	
-	motion_pub.publish(twist_msg);
-
-}
-
-/*--state changing function---------------------------------------*/
-void change_state(int next_state)
-{
-	state_ = next_state;
-	ROS_INFO("State changed to [state %d]", state_);
-}
-
-/*--"job done" function"------------------------------------------*/
-void done()
-{
-	/*publishes a Twist message that stops the robot*/
-	geometry_msgs::Twist twist_msg;
-	twist_msg.linear.x  = 0;
-	twist_msg.angular.z = 0;
-	motion_pub.publish(twist_msg);
+	     //Aggiornare la posizione del robot
+     position_ = odom_msg->pose.pose.position;
+     //aggiornare l'angolo del robot (yaw)
+     tf::Quaternion q(odom_msg->pose.pose.orientation.x,
+                      odom_msg->pose.pose.orientation.y,
+                      odom_msg->pose.pose.orientation.z,
+                      odom_msg->pose.pose.orientation.w);
+     tf::Matrix3x3 m(q);
+     m.getRPY(roll_, pitch_, yaw_);
 }
